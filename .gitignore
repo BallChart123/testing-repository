@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+infra/node_modules/
+infra/cdk.out/
+infra/dist/
+artifacts/
+*.user
