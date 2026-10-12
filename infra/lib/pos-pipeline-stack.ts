@@ -28,7 +28,7 @@ export class PosPipelineStack extends cdk.Stack {
       deadLetterQueue: { queue: dlq, maxReceiveCount: 5 }, enforceSSL: true
     });
     const parserFailureQueue = new sqs.Queue(this, 'ParserFailureQueue', { retentionPeriod: Duration.days(14), enforceSSL: true });
-    const artifact = path.resolve(__dirname, '../../artifacts/lambda');
+const artifact = path.resolve(__dirname, '../../../artifacts/lambda');
     const fn = (name: string, handler: string, timeout: number, environment: Record<string,string>) =>
       new lambda.Function(this, name, {
         runtime: lambda.Runtime.DOTNET_8, architecture: lambda.Architecture.X86_64,
@@ -81,3 +81,4 @@ export class PosPipelineStack extends cdk.Stack {
     });
   }
 }
+
