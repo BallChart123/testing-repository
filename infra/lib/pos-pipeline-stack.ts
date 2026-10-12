@@ -9,6 +9,8 @@ import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as destinations from 'aws-cdk-lib/aws-lambda-destinations';
 import * as apigw from 'aws-cdk-lib/aws-apigateway';
 import * as path from 'path';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Duration, RemovalPolicy } from 'aws-cdk-lib';
 
 export interface PosPipelineStackProps extends cdk.StackProps { readonly environmentName: string; }
@@ -28,13 +30,18 @@ export class PosPipelineStack extends cdk.Stack {
       deadLetterQueue: { queue: dlq, maxReceiveCount: 5 }, enforceSSL: true
     });
     const parserFailureQueue = new sqs.Queue(this, 'ParserFailureQueue', { retentionPeriod: Duration.days(14), enforceSSL: true });
-const artifact = path.resolve(__dirname, '../../../artifacts/lambda');
-    const fn = (name: string, handler: string, timeout: number, environment: Record<string,string>) =>
-      new lambda.Function(this, name, {
+    const artifact = path.resolve(process.cwd(), '../artifacts/lambda');
+    const fn = (name: string, handler: string, timeout: number, environment: Record<string,string>) => {
+      const logGroup = new logs.LogGroup(this, `${name}LogGroup`, {
+        retention: logs.RetentionDays.ONE_WEEK, removalPolicy: RemovalPolicy.DESTROY
+      });
+      return new lambda.Function(this, name, {
         runtime: lambda.Runtime.DOTNET_8, architecture: lambda.Architecture.X86_64,
         code: lambda.Code.fromAsset(artifact), handler: `PosReports.Functions::PosReports.Functions.${handler}::Handler`,
-        timeout: Duration.seconds(timeout), memorySize: 256, environment
+        timeout: Duration.seconds(timeout), memorySize: 256,
+        logGroup, environment
       });
+    };
     const common = { BUCKET_NAME: bucket.bucketName };
     const receiver = fn('Receiver', 'ReceiverFunction', 10, common);
     const parser = fn('Parser', 'ParserFunction', 30, { ...common, PARSED_TABLE_NAME: parsed.tableName, CALCULATION_QUEUE_URL: queue.queueUrl });
@@ -61,6 +68,15 @@ const artifact = path.resolve(__dirname, '../../../artifacts/lambda');
     });
     asyncConfig.node.addDependency(parser);
     calculator.addEventSource(new sources.SqsEventSource(queue, { batchSize: 1 }));
+    // Alarms are visible in CloudWatch; attach an SNS action in production.
+    new cloudwatch.Alarm(this, 'CalculatorDeadLettersAlarm', {
+      metric: dlq.metricApproximateNumberOfMessagesVisible({ period: Duration.minutes(5) }),
+      threshold: 1, evaluationPeriods: 1, treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING
+    });
+    new cloudwatch.Alarm(this, 'ParserFailuresAlarm', {
+      metric: parserFailureQueue.metricApproximateNumberOfMessagesVisible({ period: Duration.minutes(5) }),
+      threshold: 1, evaluationPeriods: 1, treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING
+    });
     const api = new apigw.RestApi(this, 'PosReportsApi', { restApiName: 'POS Reports Assessment' });
     api.root.addResource('pos-reports').addMethod('POST', new apigw.LambdaIntegration(receiver));
     api.root.addResource('status').addResource('{flightId}').addMethod('GET', new apigw.LambdaIntegration(status));
@@ -81,4 +97,3 @@ const artifact = path.resolve(__dirname, '../../../artifacts/lambda');
     });
   }
 }
-

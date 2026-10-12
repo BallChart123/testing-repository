@@ -5,3 +5,7 @@ infra/cdk.out/
 infra/dist/
 artifacts/
 *.user
+
+# CDK entry point is source code (the generic bin exclusion above is for .NET).
+!infra/bin/
+!infra/bin/*.ts

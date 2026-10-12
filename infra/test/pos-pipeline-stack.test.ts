@@ -18,3 +18,12 @@ test('full pipeline provisions secure storage, queues, Lambdas and API', () => {
     BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true
   }});
 });
+
+test('dead-letter alarms and bounded log retention are provisioned', () => {
+  const app = new cdk.App();
+  const stack = new PosPipelineStack(app, 'ObservabilityStack', { environmentName: 'test' });
+  const template = Template.fromStack(stack);
+  template.resourceCountIs('AWS::CloudWatch::Alarm', 2);
+  // CDK may also add its own provider log groups; verify application log groups exist.
+  expect(Object.keys(template.findResources('AWS::Logs::LogGroup')).length).toBeGreaterThanOrEqual(4);
+});

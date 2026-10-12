@@ -44,7 +44,39 @@ public sealed class PipelineTests {
         await calculate.ExecuteAsync(pub.Messages[1],default);
         Assert.Single(results.Records);
         var status=await new GetFlightStatus(parsed,results,store).ExecuteAsync(receipt.FlightId,default);
-        Assert.IsType<CalculationOutput>(status);
+        var output = Assert.IsType<CalculationOutput>(status);
+        Assert.Equal(16.705, output.Input.CurrentLatitude, 3);
+        Assert.Equal(96.2083333333, output.Input.CurrentLongitude, 3);
+        Assert.Equal("BKK", output.Input.Destination);
+        Assert.Equal(450, output.Input.GroundSpeedKnots);
+        Assert.Equal(12500, output.Input.FuelOnBoardKg);
+        Assert.Equal(2800, output.Input.FuelFlowKgPerHour);
+        var json = PosJson.Serialize(output);
+        Assert.Contains("\"input\"", json);
+        Assert.Contains("\"currentLatitude\"", json);
+    }
+    [Fact] public async Task PendingStatusBeforeCalculation_UsesSyntheticReport() {
+        var store=new Store();var parsed=new Parsed();var pub=new Publisher();var parser=new PosReportParser();
+        var receipt=await new ReceivePosReport(parser,store,new Clock()).ExecuteAsync(Raw,default);
+        await new ProcessPosReport(store,parser,parsed,pub).ExecuteAsync(Assert.Single(store.Objects.Keys),default);
+        var status=await new GetFlightStatus(parsed,new Results(),store).ExecuteAsync(receipt.FlightId,default);
+        Assert.Equal("PROCESSING",Assert.IsType<StatusPending>(status).Status);
+    }
+    [Fact] public async Task ConflictingParsedAttachment_IsRejectedWithoutOverwriting() {
+        var store=new Store();var parsed=new Parsed();var pub=new Publisher();var parser=new PosReportParser();
+        await new ReceivePosReport(parser,store,new Clock()).ExecuteAsync(Raw,default);
+        var key=Assert.Single(store.Objects.Keys);
+        var useCase=new ProcessPosReport(store,parser,parsed,pub);
+        await useCase.ExecuteAsync(key,default);
+        var attachment=Assert.Single(store.Objects.Keys.Where(x=>x.StartsWith("attachment/")));
+        store.Objects[attachment]="{\"tampered\":true}";
+        await Assert.ThrowsAsync<PipelineConflictException>(()=>useCase.ExecuteAsync(key,default));
+        Assert.Single(pub.Messages);
+    }
+    [Fact] public async Task MissingFlightStatus_ReturnsNull() {
+        var status=await new GetFlightStatus(new Parsed(),new Results(),new Store())
+            .ExecuteAsync("ZZ99920260904RGNBKK",default);
+        Assert.Null(status);
     }
     [Fact] public void RawAndResultKeysUseGregorianYearUnderThaiCulture() {
         var original = CultureInfo.CurrentCulture;

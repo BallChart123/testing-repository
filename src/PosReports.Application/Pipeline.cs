@@ -15,7 +15,7 @@ public sealed record ParsedRecord(string FlightId, string Timestamp, string Atta
 public sealed record ResultRecord(string FlightId, string Timestamp, string Attachment, string SourceReportTimestamp);
 public sealed record CalculationMessage(string FlightId, string Timestamp);
 public sealed record Receipt(string FlightId, string Status);
-public sealed record CalculationOutput(string FlightId, string Timestamp, int RemainingFlightTimeMinutes, double EstimatedFuelAtArrivalKg, bool LowFuelWarning);
+public sealed record CalculationOutput(string FlightId, string Timestamp, CalculationInput Input, int RemainingFlightTimeMinutes, double EstimatedFuelAtArrivalKg, bool LowFuelWarning);
 public sealed record StatusPending(string FlightId, string Status);
 public sealed class PipelineConflictException(string message) : Exception(message);
 public sealed class MissingDependencyException(string message) : Exception(message);
@@ -109,7 +109,7 @@ public sealed class CalculateFlight(IObjectStore store, IParsedRepository parsed
         var calculatedAt = clock.UtcNow;
         var calculation = calculator.Calculate(report, airports.Find(report.Destination), calculatedAt);
         var calculationTimestamp = calculatedAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
-        var output = new CalculationOutput(report.FlightId, calculationTimestamp, calculation.RemainingFlightTimeMinutes, calculation.EstimatedFuelAtArrivalKg, calculation.LowFuelWarning);
+        var output = new CalculationOutput(report.FlightId, calculationTimestamp, calculation.Input, calculation.RemainingFlightTimeMinutes, calculation.EstimatedFuelAtArrivalKg, calculation.LowFuelWarning);
         var key = Keys.Result(report.FlightId, calculatedAt);
         if (!await store.PutIfAbsentAsync(key, PosJson.Serialize(output), "application/json", ct)) throw new PipelineConflictException("Result key collision");
         var record = new ResultRecord(report.FlightId, calculationTimestamp, key, message.Timestamp);

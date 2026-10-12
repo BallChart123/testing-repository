@@ -37,12 +37,12 @@ public sealed class ReceiverFunction {
             var raw=request.Body ?? "";
             if(request.IsBase64Encoded) raw=Encoding.UTF8.GetString(Convert.FromBase64String(raw));
             var receipt=await new ReceivePosReport(Dependencies.Parser,Dependencies.Store,Dependencies.Clock).ExecuteAsync(raw,default);
-            context.Logger.LogLine($"Received POS flightId={receipt.FlightId}");
+            context.Logger.LogLine("event=pos_received status=RECEIVED");
             return Http.Reply(202,receipt);
         } catch(InvalidPosReportException e) {return Http.Reply(400,new{code="INVALID_POS_REPORT",message=e.Message});}
           catch(FormatException) {return Http.Reply(400,new{code="INVALID_POS_REPORT",message="Invalid body encoding"});}
           catch(PipelineConflictException) {return Http.Reply(409,new{code="CONFLICT",message="Raw report key conflict; retry"});}
-          catch(Exception e) {context.Logger.LogLine($"Receiver failed: {e}");return Http.Reply(500,new{code="INTERNAL_SERVER_ERROR",message="Unable to receive POS report"});}
+          catch(Exception e) {context.Logger.LogLine($"event=receiver_failed errorType={e.GetType().Name}");return Http.Reply(500,new{code="INTERNAL_SERVER_ERROR",message="Unable to receive POS report"});}
     }
 }
 public sealed class ParserFunction {
@@ -50,8 +50,8 @@ public sealed class ParserFunction {
         var useCase=new ProcessPosReport(Dependencies.Store,Dependencies.Parser,Dependencies.Parsed,Dependencies.Publisher);
         foreach(var record in evt.Records) {
             var key=Uri.UnescapeDataString(record.S3.Object.Key.Replace('+',' '));
-            try { await useCase.ExecuteAsync(key,default); context.Logger.LogLine($"Parsed {key}"); }
-            catch(Exception e) {context.Logger.LogLine($"Parser failed key={key}: {e}");throw;}
+            try { await useCase.ExecuteAsync(key,default); context.Logger.LogLine("event=pos_parsed status=COMPLETED"); }
+            catch(Exception e) {context.Logger.LogLine($"event=parser_failed errorType={e.GetType().Name}");throw;}
         }
     }
 }
@@ -59,8 +59,8 @@ public sealed class CalculatorFunction {
     public async Task Handler(SQSEvent evt,ILambdaContext context) {
         var useCase=new CalculateFlight(Dependencies.Store,Dependencies.Parsed,Dependencies.Results,new InMemoryAirportCatalog(),new FlightCalculator(),Dependencies.Clock);
         foreach(var record in evt.Records) {
-            try { var msg=PosJson.Deserialize<CalculationMessage>(record.Body);await useCase.ExecuteAsync(msg,default);context.Logger.LogLine($"Calculated {msg.FlightId} {msg.Timestamp}"); }
-            catch(Exception e) {context.Logger.LogLine($"Calculator failed messageId={record.MessageId}: {e}");throw;}
+            try { var msg=PosJson.Deserialize<CalculationMessage>(record.Body);await useCase.ExecuteAsync(msg,default);context.Logger.LogLine("event=calculation_completed status=COMPLETED"); }
+            catch(Exception e) {context.Logger.LogLine($"event=calculator_failed errorType={e.GetType().Name}");throw;}
         }
     }
 }
@@ -71,6 +71,6 @@ public sealed class StatusFunction {
             var value=await new GetFlightStatus(Dependencies.Parsed,Dependencies.Results,Dependencies.Store).ExecuteAsync(id,default);
             return value is null?Http.Reply(404,new{code="FLIGHT_NOT_FOUND",message="No report found"}):Http.Reply(200,value);
         } catch(FormatException) {return Http.Reply(400,new{code="INVALID_FLIGHT_ID",message="Invalid flight ID"});}
-          catch(Exception e) {context.Logger.LogLine($"Status failed: {e}");return Http.Reply(500,new{code="INTERNAL_SERVER_ERROR",message="Unable to read status"});}
+          catch(Exception e) {context.Logger.LogLine($"event=status_failed errorType={e.GetType().Name}");return Http.Reply(500,new{code="INTERNAL_SERVER_ERROR",message="Unable to read status"});}
     }
 }

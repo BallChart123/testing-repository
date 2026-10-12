@@ -143,3 +143,28 @@ This checks successful POST, polls GET until a calculation is available, and che
 - AWS deployment and live E2E: **not executed** (no AWS CLI/account credentials in preparation environment).
 
 **Do not claim the take-home is deployment-verified until these commands succeed.**
+
+## Synthetic-only E2E validation and privacy
+
+Run against **only an authorized assessment/dev AWS environment**, never production:
+
+```powershell
+python scripts/e2e_smoke.py "https://YOUR-API.execute-api.YOUR-REGION.amazonaws.com/prod" 120
+```
+
+The smoke test generates a fictitious `ZZ999` flight identifier and invented location/fuel values. It uses public airport codes for the calculator and never needs passenger, employee, customer or real operational flight data. Do not place personal data, credentials, production exports or real flight reports in tests, logs, commits or submissions. The endpoint must be HTTPS. A live AWS end-to-end test has not been run by the author of this patch.
+
+## Assessment hardening (synthetic data only)
+
+- **Duplicate delivery:** parsed metadata and attachment writes use conditional create and collision checks; the parser intentionally republishes after a duplicate S3 delivery so a failed previous SQS publish can recover. The calculator checks existing results for the same source report. **Limit:** this is best-effort deduplication, not a transactional exactly-once guarantee under concurrent consumers.
+- **PII-safe application logs:** Lambda handlers log fixed event labels and exception **type names only**, never the raw POS request, S3 key, SQS message body, flight identifier, or exception message/stack. AWS service-generated access logs and payloads must be governed separately. Avoid enabling full request/response tracing in shared environments.
+- **Failure handling:** calculator queue has a DLQ after five receives; S3-invoked parser has an asynchronous failure destination. Two CloudWatch alarms detect visible messages in the failure queues. These alarms have **no notification action**; configure a reviewed SNS destination for a production environment.
+- **Retention:** application Lambda log groups use a seven-day retention setting. S3 and DynamoDB use assessment-only `DESTROY` policies and must not be deployed to production unchanged.
+- **Tests:** in-memory tests cover duplicate deliveries, conflict detection, pending and missing status, invariant Gregorian timestamps and calculation inputs. The deployed smoke test uses a synthetic `ZZ999` flight identifier and synthetic numerical values; it refuses non-HTTPS endpoints.
+- **Privacy:** use an isolated authorized AWS account and synthetic fixtures only. Never commit AWS credentials, `.env` files, personal data, or production reports. For a real deployment, consider KMS, stricter access boundaries, encryption and data retention requirements.
+
+### Validation before submission
+
+From the project root, run `dotnet test PosReports.sln` and `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-lambda.ps1`; then `cd infra`, `npm install`, `npm run build`, `npm test`, and `npx cdk synth`. Deploy and execute `python scripts/e2e_smoke.py <HTTPS-API-BASE-URL> 120` **only** in an authorized isolated test account. This revision has not been verified by a live AWS deployment in this environment.
+
+**Repository note:** `.gitignore` explicitly includes `infra/bin/app.ts`; ensure this CDK entry point is committed, since the general `.NET` `bin/` ignore pattern would otherwise exclude it.
